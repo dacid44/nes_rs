@@ -77,7 +77,7 @@ fn main() {
             canvas.present();
         }
 
-        print_snake_state(&cpu);
+        // print_snake_state(&cpu);
         if cpu.run_instruction().is_break() {
             println!("cpu exited");
             break;

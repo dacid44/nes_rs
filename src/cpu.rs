@@ -335,7 +335,7 @@ impl Cpu {
 
             _ => todo!("opcode {opcode:#X}");
         }
-        // println!("{}\n", self.state_string());
+        println!("{}\n", self.state_string());
         ControlFlow::Continue(())
     }
 
@@ -475,38 +475,18 @@ impl Cpu {
             .set(StatusFlags::NEGATIVE, result & 0b1000_0000 != 0);
     }
 
-    // fn add_unsigned(&mut self, operand: u8) {
-    //     let (result, carry) = self.accumulator.overflowing_add(operand);
-    //     let overflow = (self.accumulator as i8).overflowing_add(operand as i8).1;
-    //
-    //     self.status.set(StatusFlags::CARRY, carry);
-    //     self.status.set(StatusFlags::OVERFLOW, overflow);
-    //
-    //     self.accumulator = result;
-    //     self.update_zero_and_negative_flags(self.accumulator);
-    // }
-
-    // fn add_unsigned(&mut self, operand: u8, carry: i8) {
-    //     let (result, carry1) = self.accumulator.overflowing_add(operand);
-    //     let (result, carry2) = result.overflowing_add_signed(carry);
-    //
-    //     let (s_result, overflow1) = (self.accumulator as i8).overflowing_add(operand as i8);
-    //     let overflow2 = s_result.overflowing_add(carry).1;
-    //
-    //     self.status.set(StatusFlags::CARRY, carry1 || carry2);
-    //     self.status
-    //         .set(StatusFlags::OVERFLOW, overflow1 ^ overflow2);
-    //
-    //     self.accumulator = result;
-    //     self.update_zero_and_negative_flags(self.accumulator);
-    // }
-
     fn add_unsigned(&mut self, operand: u8) {
-        let carry_in = if self.status.contains(StatusFlags::CARRY) { 1 } else { 0 };
+        let carry_in = if self.status.contains(StatusFlags::CARRY) {
+            1
+        } else {
+            0
+        };
 
+        // Do add and check for unsigned carry
         let (result, carry1) = self.accumulator.overflowing_add(operand);
         let (result, carry2) = result.overflowing_add(carry_in);
 
+        // Check for unsigned overflow
         let (s_result, overflow1) = (self.accumulator as i8).overflowing_add(operand as i8);
         let overflow2 = s_result.overflowing_add_unsigned(carry_in).1;
 
@@ -556,18 +536,6 @@ impl Cpu {
         self.status.set(StatusFlags::CARRY, carry);
         self.update_zero_and_negative_flags(result);
     }
-
-    // fn adc(&mut self, mode: AddressingMode) {
-    //     let addr = self.get_operand_address(mode);
-    //     self.add_unsigned(
-    //         self.mem_read(addr),
-    //         if self.status.contains(StatusFlags::CARRY) {
-    //             1
-    //         } else {
-    //             0
-    //         },
-    //     );
-    // }
 
     fn adc(&mut self, mode: AddressingMode) {
         let addr = self.get_operand_address(mode);
@@ -793,43 +761,13 @@ impl Cpu {
         self.program_counter = self.stack_pull_u16().wrapping_add(1);
     }
 
-    // fn sbc(&mut self, mode: AddressingMode) {
-    //     let addr = self.get_operand_address(mode);
-    //     self.add_unsigned(
-    //         (!self.mem_read(addr)).wrapping_add(1),
-    //         if self.status.contains(StatusFlags::CARRY) {
-    //             0
-    //         } else {
-    //             -1
-    //         },
-    //     );
-    // }
-
     fn sbc(&mut self, mode: AddressingMode) {
         let addr = self.get_operand_address(mode);
+        // Negate by taking complement and add one, but we don't add one since add_unsigned() will
+        // do it if there's a carry (otherwise we would subtract one from the negated operand if
+        // there wasn't a carry, so they cancel out and so we just complement)
         self.add_unsigned(!self.mem_read(addr));
     }
-
-    // fn sbc(&mut self, mode: AddressingMode) {
-    //     let addr = self.get_operand_address(mode);
-    //     let operand = self.mem_read(addr);
-    //
-    //     let carry_in = if self.status.contains(StatusFlags::CARRY) { 0 } else { -1 };
-    //
-    //     let (result, carry1) = self.accumulator.overflowing_sub(operand);
-    //     let (result, carry2) = result.overflowing_add_signed(carry_in);
-    //
-    //     let (s_result, overflow1) = (self.accumulator as i8).overflowing_sub(operand as i8);
-    //     let overflow2 = s_result.overflowing_add(carry_in).1;
-    //
-    //     self.status.set(StatusFlags::CARRY, overflow1);
-    //     self.status
-    //         .set(StatusFlags::OVERFLOW, overflow2);
-    //
-    //     self.accumulator = result;
-    //     self.update_zero_and_negative_flags(self.accumulator);
-    //
-    // }
 
     fn sec(&mut self, _mode: AddressingMode) {
         self.status.insert(StatusFlags::CARRY);
@@ -1401,7 +1339,10 @@ mod test {
 
     #[test]
     fn test_0xe9_sbc() {
-        let cpu = TestCpu::new(&[0xE9, 0x60, 0x00]).with_acc(0xA0).with_status(StatusFlags::CARRY).run();
+        let cpu = TestCpu::new(&[0xE9, 0x60, 0x00])
+            .with_acc(0xA0)
+            .with_status(StatusFlags::CARRY)
+            .run();
         assert_eq!(cpu.accumulator, 0x40);
         assert!(cpu.status.contains(StatusFlags::CARRY));
         assert!(cpu.status.contains(StatusFlags::OVERFLOW));
