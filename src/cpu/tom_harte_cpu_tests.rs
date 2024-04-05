@@ -1,7 +1,9 @@
-use std::fs::File;
+use std::{cell::RefCell, fs::File, rc::Rc};
 
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::Deserialize;
+
+use crate::bus::{Bus, CpuBus, FlatRam};
 
 use super::{Cpu, StatusFlags};
 
@@ -23,12 +25,14 @@ fn run_tom_harte_tests() {
         })
 }
 
-// #[test]
+#[ignore]
+#[test]
 fn run_one_tom_harte_test() {
-    const TEST: &str = "e9.json";
+    const TEST: &str = "00.json";
     let path = format!("roms/tom_harte_tests/{}", TEST);
-    let test_cases: Vec<TestCase> = serde_json::from_reader(File::open(&path).unwrap()).unwrap();
-    test_cases.par_iter().for_each(|test_case| {
+    let test_cases: Vec<TestCase> =
+        serde_json::from_reader(File::open(&path).unwrap()).unwrap();
+    test_cases.iter().for_each(|test_case| {
         test_case.run(&path);
     });
 }
@@ -40,6 +44,7 @@ struct TestCase {
     // "final" is a reserved keyword
     #[serde(rename = "final")]
     end: TestState,
+    cycles: Vec<(u16, u8, Access)>,
 }
 
 impl TestCase {
@@ -49,6 +54,8 @@ impl TestCase {
         let mut cpu = self.initial.create_cpu();
         cpu.run_instruction();
         self.end.check_cpu(&cpu, &name);
+
+        assert_eq!(cpu.bus.access_log, self.cycles, "{}; cycles", name);
     }
 }
 
@@ -63,13 +70,56 @@ struct TestState {
     ram: Vec<(u16, u8)>,
 }
 
-impl TestState {
-    fn create_cpu(&self) -> Cpu {
-        let mut cpu = Cpu::new();
-        for &(addr, data) in &self.ram {
-            cpu.mem_write(addr, data);
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum Access {
+    Read,
+    Write,
+}
+
+struct TestRam {
+    bus: FlatRam,
+    access_log: Vec<(u16, u8, Access)>,
+}
+
+impl TestRam {
+    fn new() -> Self {
+        Self {
+            bus: FlatRam::new(),
+            access_log: Vec::new(),
         }
-        cpu.reset();
+    }
+}
+
+impl Bus for TestRam {
+    fn read(&mut self, addr: u16) -> u8 {
+        // println!("{}", std::backtrace::Backtrace::force_capture());
+        let result = self.bus.read(addr);
+        println!("read from {addr:#06X}: {result:#04X}");
+        self.access_log.push((addr, result, Access::Read));
+        result
+    }
+
+    fn write(&mut self, addr: u16, data: u8) {
+        self.access_log.push((addr, data, Access::Write));
+        self.bus.write(addr, data);
+    }
+
+    fn peek(&self, addr: u16) -> Option<u8> {
+        self.bus.peek(addr)
+    }
+}
+
+impl CpuBus for TestRam {}
+
+impl TestState {
+    fn create_cpu(&self) -> Cpu<TestRam> {
+        let mut cpu = Cpu::new(TestRam::new());
+        for &(addr, data) in &self.ram {
+            cpu.bus.bus.write(addr, data);
+        }
+        // cpu.reset();
         cpu.program_counter = self.pc;
         cpu.stack_pointer = self.s;
         cpu.accumulator = self.a;
@@ -79,10 +129,10 @@ impl TestState {
         cpu
     }
 
-    fn check_cpu(&self, cpu: &Cpu, name: &str) {
+    fn check_cpu(&self, cpu: &Cpu<TestRam>, name: &str) {
         for &(addr, data) in &self.ram {
             assert_eq!(
-                cpu.mem_read(addr),
+                cpu.bus.bus.peek(addr).unwrap(),
                 data,
                 "{}; memory address {addr:#06X}",
                 name
@@ -100,7 +150,7 @@ impl TestState {
         //     StatusFlags::from_bits_retain(self.p).contains(StatusFlags::OVERFLOW)
         // );
         assert_eq!(
-            cpu.status,
+            cpu.status & !(StatusFlags::_ONE),
             StatusFlags::from_bits_retain(self.p) & !(StatusFlags::_ONE),
             "{}; status flags",
             name

@@ -11,9 +11,13 @@ paste = "1.0.14"
 rand = { version = "0.8.5", default-features = false, features = ["small_rng", "getrandom"] }
 spin_sleep = "1.2.0"
 sdl2 = "0.36.0"
+enum-map = "2.7.3"
 
 [dev-dependencies]
 glob = "0.3.1"
 rayon = "1.10.0"
 serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1.0.115"
+
+[profile.release]
+debug = true
