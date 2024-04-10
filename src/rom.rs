@@ -2,7 +2,7 @@ const NES_TAG: [u8; 4] = [0x4E, 0x45, 0x53, 0x1A];
 const PRG_ROM_PAGE_SIZE: usize = 0x4000;
 const CHR_ROM_PAGE_SIZE: usize = 0x2000;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mirroring {
     Vertical,
     Horizontal,
@@ -44,6 +44,15 @@ impl Rom {
 
         let prg_rom_start = 16 + if skip_trainer { 0x200 } else { 0x0 };
         let chr_rom_start = prg_rom_start + prg_rom_size;
+
+        // let mut raw = raw.to_vec();
+        // raw[chr_rom_start..].copy_within(0x1210..0x1220, 0x1240);
+        // let chr1 = 0b0000_1110;
+        // let chr2 = 0b0111_1110;
+        // raw[chr_rom_start..][0x1240..0x1250].copy_from_slice(&[
+        //     0x00, chr1, chr1, chr1, chr1, chr1, chr1, 0x00, 0x00, 0x00, 0x00, 0x00, chr2, chr2,
+        //     chr2, 0x00,
+        // ]);
 
         Ok(Self {
             prg_rom: raw[prg_rom_start..prg_rom_start + prg_rom_size].into(),

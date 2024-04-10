@@ -1,5 +1,8 @@
 use crate::{
-    cpu::{Interrupts, PROGRAM_START, PROGRAM_START_LOC}, joypad::Joypad, ppu::Ppu, rom::Rom
+    cpu::{Interrupts, PROGRAM_START, PROGRAM_START_LOC},
+    joypad::Joypad,
+    ppu::{Ppu, PpuBus},
+    rom::Rom,
 };
 
 pub trait CpuBus: Bus {
@@ -60,7 +63,7 @@ pub struct NesBus {
     prg_rom: Box<[u8]>,
     pub ppu: Ppu,
     last_nmi_state: bool,
-    pub joypads: [Joypad; 2]
+    pub joypads: [Joypad; 2],
 }
 
 impl NesBus {
@@ -73,7 +76,7 @@ impl NesBus {
         Self {
             cpu_vram: [0; 2048],
             prg_rom: rom.prg_rom,
-            ppu: Ppu::new(rom.chr_rom, rom.screen_mirroring),
+            ppu: Ppu::new(PpuBus::new(rom.chr_rom, rom.screen_mirroring)),
             last_nmi_state: false,
             joypads: [Joypad::new(), Joypad::new()],
         }
@@ -95,9 +98,7 @@ impl Bus for NesBus {
                 }
                 self.prg_rom[rom_addr as usize]
             }
-            0x4016..=0x4017 => {
-                self.joypads[(addr - 0x4016) as usize].read()
-            }
+            0x4016..=0x4017 => self.joypads[(addr - 0x4016) as usize].read(),
             _ => {
                 // println!("Ignoring mem access at {addr:#06X}");
                 0
@@ -159,10 +160,11 @@ impl CpuBus for NesBus {
         }
 
         self.last_nmi_state = nmi_state;
+        // if interrupts != Interrupts::empty() {
+        //     println!("bus interrupts: {:?}", interrupts);
+        // }
         interrupts
     }
 
-    fn run_cycle(&mut self) {
-
-    }
+    fn run_cycle(&mut self) {}
 }

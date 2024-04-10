@@ -340,8 +340,16 @@ impl<B: CpuBus> Cpu<B> {
         // lazy anymore
         let code = self.bus.peek(self.program_counter).unwrap_or_default();
         let opcode = Self::OPCODES[code].expect("attempted to format an invalid opcode");
-        let low = || self.bus.peek(self.program_counter.wrapping_add(1)).unwrap_or_default();
-        let high = || self.bus.peek(self.program_counter.wrapping_add(2)).unwrap_or_default();
+        let low = || {
+            self.bus
+                .peek(self.program_counter.wrapping_add(1))
+                .unwrap_or_default()
+        };
+        let high = || {
+            self.bus
+                .peek(self.program_counter.wrapping_add(2))
+                .unwrap_or_default()
+        };
         let addr = || u16::from_le_bytes([low(), high()]);
         let one_byte = || format!("{code:02X}");
         let two_bytes = || format!("{code:02X} {:02X}", low());
@@ -389,7 +397,11 @@ impl<B: CpuBus> Cpu<B> {
             }
             AddressingMode::Absolute => (
                 three_bytes(),
-                format!("${:04X} = {:02X}", addr(), self.bus.peek(addr()).unwrap_or_default()),
+                format!(
+                    "${:04X} = {:02X}",
+                    addr(),
+                    self.bus.peek(addr()).unwrap_or_default()
+                ),
             ),
             AddressingMode::AbsoluteX => (three_bytes(), {
                 let addr_x = addr().wrapping_add(self.index_x as u16);
@@ -425,7 +437,9 @@ impl<B: CpuBus> Cpu<B> {
                 let ptr = low().wrapping_add(self.index_x);
                 let addr = u16::from_le_bytes([
                     self.bus.peek(ptr as u16).unwrap_or_default(),
-                    self.bus.peek(ptr.wrapping_add(1) as u16).unwrap_or_default(),
+                    self.bus
+                        .peek(ptr.wrapping_add(1) as u16)
+                        .unwrap_or_default(),
                 ]);
                 format!(
                     "(${:02X},X) @ {:02X} = {:04X} = {:02X}",
@@ -438,7 +452,9 @@ impl<B: CpuBus> Cpu<B> {
             AddressingMode::IndirectIndexedY => (two_bytes(), {
                 let addr = u16::from_le_bytes([
                     self.bus.peek(low() as u16).unwrap_or_default(),
-                    self.bus.peek(low().wrapping_add(1) as u16).unwrap_or_default(),
+                    self.bus
+                        .peek(low().wrapping_add(1) as u16)
+                        .unwrap_or_default(),
                 ]);
                 let addr_y = addr.wrapping_add(self.index_y as u16);
                 format!(
@@ -542,6 +558,7 @@ impl<B: CpuBus> Cpu<B> {
                     // println!("interrupt: {:?}", self.buffered_interrupts);
                     code = 0x00;
                     self.program_counter = self.program_counter.wrapping_sub(1);
+                    // println!("interrupt starting: {:?}", self.buffered_interrupts);
                 }
                 if let Some(opcode) = Self::OPCODES[code] {
                     self.current_instruction = Some((opcode, 0));

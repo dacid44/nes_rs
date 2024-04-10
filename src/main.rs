@@ -59,7 +59,7 @@ fn main() {
     // cpu.program_counter = 0x400;
 
     let mut cpu = Cpu::new(NesBus::new(
-        Rom::new(include_bytes!("../roms/Donkey Kong (JU) [p1].nes")).unwrap(),
+        Rom::new(include_bytes!("../roms/Pac-Man (U) [!].nes")).unwrap(),
     ));
     cpu.reset();
     // cpu.program_counter = 0xC000;
@@ -104,7 +104,7 @@ fn main() {
         ts += Duration::from_secs_f64(1.0 / CLOCK_SPEED);
         // let duration = (ts - Instant::now()).max(Duration::ZERO);
         // spin_sleep::sleep(duration);
-        // while Instant::now() < ts {}
+        while Instant::now() < ts {}
 
         if !is_vblank && cpu.bus.ppu.is_vblank() {
             frame_tx.send(cpu.bus.ppu.frame.data.clone()).unwrap();
