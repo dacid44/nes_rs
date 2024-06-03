@@ -1,7 +1,10 @@
 use bitfield::bitfield;
 use bitflags::{bitflags, Flags};
 
-use crate::{bus::Bus, rom::Mirroring};
+use crate::{
+    bus::Bus,
+    rom::{Mirroring, PpuMapper},
+};
 use std::{array, mem, ops::RangeInclusive};
 
 #[rustfmt::skip]
@@ -257,7 +260,8 @@ impl Ppu {
 
         if (1..=256).contains(&self.dot) {
             let x = (self.dot - 1) as u8;
-            self.fetched_sprites.clone()
+            self.fetched_sprites
+                .clone()
                 .into_iter()
                 .flatten()
                 .filter(|sprite| (sprite.x..=sprite.x.saturating_add(7)).contains(&x))
@@ -346,63 +350,6 @@ impl Ppu {
         }
     }
 
-    // fn get_sprite_data(&self) -> Option<(Option<(u8, u8, u8)>, bool, bool)> {
-    //     let x = (self.dot - 1) as u8;
-    //     self.line_sprites
-    //         .iter()
-    //         .flatten()
-    //         .filter(|(_, range_x)| range_x.contains(&x))
-    //         .map(|(i, range_x)| {
-    //             // I think this should be saturating, NESDev Wiki says a sprite is offscreen if y =
-    //             // 0xFF
-    //             let sprite_y = self.oam_data[i * 4].saturating_add(1);
-    //
-    //             // TODO: Tall sprites
-    //             let mut tile_number = self.oam_data[i * 4 + 1];
-    //
-    //             let byte_2 = self.oam_data[i * 4 + 2];
-    //             let palette_number = byte_2 & 0b11;
-    //             let priority = byte_2 & 0b0010_0000 != 0;
-    //             let h_flip = byte_2 & 0b0100_0000 != 0;
-    //             let v_flip = byte_2 & 0b1000_0000 != 0;
-    //
-    //             let right_page = if self.ctrl_register.contains(ControlRegister::SPRITE_SIZE) {
-    //                 let right_page = tile_number & 1 != 0;
-    //                 if (self.line as u8 - sprite_y > 7) ^ v_flip {
-    //                     tile_number |= 1;
-    //                 } else {
-    //                     tile_number &= !1;
-    //                 }
-    //                 right_page
-    //             } else {
-    //                 self.ctrl_register
-    //                     .contains(ControlRegister::SPRITE_PATTERN_ADDR)
-    //             };
-    //
-    //             let color_index = self.get_pattern_table_entry(
-    //                 right_page,
-    //                 tile_number,
-    //                 if v_flip {
-    //                     7 - (self.line as u8 - sprite_y)
-    //                 } else {
-    //                     self.line as u8 - sprite_y
-    //                 },
-    //                 if h_flip {
-    //                     7 - (x - range_x.start())
-    //                 } else {
-    //                     x - range_x.start()
-    //                 },
-    //             );
-    //
-    //             (
-    //                 self.get_color(false, palette_number, color_index),
-    //                 priority,
-    //                 *i == 0,
-    //             )
-    //         })
-    //         .reduce(|front, back| stack_colors(back, front))
-    // }
-
     fn get_color(
         &mut self,
         background: bool,
@@ -442,6 +389,7 @@ impl Bus for Ppu {
             0x2004 => self.oam_data[self.oam_addr as usize],
             0x2007 => {
                 let ppu_addr = self.get_address(true);
+                // TODO: Shadowed PPU palette memory weirdness
                 match ppu_addr {
                     0x0000..=0x3EFF => mem::replace(&mut self.data_buffer, self.bus.read(ppu_addr)),
                     _ => self.bus.read(ppu_addr),
@@ -483,19 +431,15 @@ impl Bus for Ppu {
 }
 
 pub struct PpuBus {
-    chr_rom: Box<[u8]>,
-    vram: [u8; 2048],
+    mapper: PpuMapper,
     palette_table: [u8; 32],
-    mirroring: Mirroring,
 }
 
 impl PpuBus {
-    pub fn new(chr_rom: Box<[u8]>, mirroring: Mirroring) -> Self {
+    pub fn new(mapper: PpuMapper) -> Self {
         Self {
-            chr_rom,
-            vram: [0; 2048],
+            mapper,
             palette_table: [0; 32],
-            mirroring,
         }
     }
 }
@@ -503,36 +447,26 @@ impl PpuBus {
 impl Bus for PpuBus {
     fn read(&mut self, addr: u16) -> u8 {
         match addr {
-            0x0000..=0x1FFF => self.chr_rom[addr as usize],
-            0x2000..=0x2FFF | 0x3000..=0x3EFF => {
-                // Some sources say 0x3000..=0x3EFF are unused, others say they mirror
-                // VRAM. I'm guessing it probably depends on the mapper.
-                let vram_addr = mirror_vram_addr(addr, self.mirroring);
-                self.vram[vram_addr as usize]
-            }
-            0x3F00..=0x3FFF => self.palette_table[(addr % 0x20) as usize],
+            0x0000..=0x3EFF => self.mapper.read(addr),
+            0x3F00..=0x3FFF => self.palette_table[mirror_palette_addr(addr) as usize],
             _ => panic!("unexpected access to PPU address {addr:#06X}"),
         }
     }
 
     fn write(&mut self, addr: u16, data: u8) {
+        (addr, data);
         match addr {
-            0x0000..=0x1FFF => {
-                panic!("attempt to write to cartridge CHR ROM space: addr {addr:#06X}");
+            0x0000..=0x3EFF => self.mapper.write(addr, data),
+            0x3F00..=0x3FFF => {
+                self.palette_table[mirror_palette_addr(addr) as usize] = data & 0b0011_1111
             }
-            0x2000..=0x2FFF | 0x3000..=0x3EFF => {
-                // Some sources say 0x3000..=0x3EFF are unused, others say they mirror
-                // VRAM. I'm guessing it probably depends on the mapper.
-                self.vram[mirror_vram_addr(addr, self.mirroring) as usize] = data;
-            }
-            0x3F00..=0x3FFF => self.palette_table[(addr % 0x20) as usize] = data,
             _ => panic!("unexpected access to PPU addr {addr:#06X}"),
         }
     }
 
-    fn peek(&self, _addr: u16) -> Option<u8> {
+    fn peek(&self, addr: u16) -> Option<u8> {
         // TODO: Implement this for better tracing and debuggability
-        None
+        self.mapper.peek(addr)
     }
 }
 
@@ -562,6 +496,7 @@ impl Registers {
 
     fn write_ctrl(&mut self, data: u8) {
         self.t.set_nt_select(data as u16 & 0b11);
+        // self.t.set_nt_select(0);
         self.ctrl = ControlRegister::from_bits_truncate(data);
         // println!(
         //     "write ctrl,             data: {data:#010b}, new t: {:?}",
@@ -572,17 +507,19 @@ impl Registers {
     fn write_scroll(&mut self, data: u8) {
         if self.w {
             self.t.set_fine_y(data as u16 & 0b0000_0111);
-            self.t.set_coarse_y(data as u16 & 0b1111_1000);
+            self.t.set_coarse_y(data as u16 >> 3);
             self.w = false;
         } else {
             self.t.set_coarse_x(data as u16 >> 3);
             self.x = data & 0b111;
             self.w = true;
         }
-        // println!(
-        //     "write scroll, y: {:<5}, data: {data:#010b}, new t: {:?}",
-        //     self.w, self.t
-        // );
+        // if !self.w {
+        //     println!(
+        //         "write scroll, y: {:<5}, data: {data:#010b}, new t: {:?}",
+        //         self.w, self.t
+        //     );
+        // }
     }
 
     fn write_addr(&mut self, data: u8) {
@@ -608,7 +545,7 @@ impl Registers {
         if self.v.coarse_x() == 31 {
             // println!("coarse x overflow");
             self.v.set_coarse_x(0);
-            self.v.set_nt_select(self.v.nt_select() ^ 0b01);
+            self.v.set_nt_x_select(self.v.nt_x_select() ^ 1);
         } else {
             self.v.set_coarse_x(self.v.coarse_x() + 1);
         }
@@ -631,7 +568,7 @@ impl Registers {
                 // println!("coarse y overflow");
                 // Clear coarse y and swap vertical nametable
                 self.v.set_coarse_y(0);
-                self.v.set_nt_select(self.v.nt_select() ^ 0b10);
+                self.v.set_nt_y_select(self.v.nt_y_select() ^ 1);
             } else if coarse_y == 31 {
                 // println!("coarse y extra overflow");
                 // Coarse y can be out of bounds. In that case, it will wrap to 0, but not swap the
@@ -690,7 +627,7 @@ bitfield! {
     // impl Debug;
     coarse_x, set_coarse_x: 4, 0;
     coarse_y, set_coarse_y: 9, 5;
-    coarse_pos, set_coarse_pos: 9, 0;
+    coarse_pos, set_coarse_pos: 11, 0;
     nt_x_select, set_nt_x_select: 10, 10;
     nt_y_select, set_nt_y_select: 11, 11;
     nt_select, set_nt_select: 11, 10;
@@ -877,6 +814,10 @@ fn mirror_vram_addr(addr: u16, mirroring: Mirroring) -> u16 {
         _ => [0; 4],
     };
     vram_index - offset[(vram_index / 0x400) as usize]
+}
+
+fn mirror_palette_addr(addr: u16) -> u16 {
+    addr % if addr % 0x4 == 0 { 0x10 } else { 0x20 }
 }
 
 bitflags! {

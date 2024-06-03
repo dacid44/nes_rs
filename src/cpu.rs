@@ -339,7 +339,10 @@ impl<B: CpuBus> Cpu<B> {
         // TODO: Maybe remove some of the closures, using peek() these don't necessarily need to be
         // lazy anymore
         let code = self.bus.peek(self.program_counter).unwrap_or_default();
-        let opcode = Self::OPCODES[code].expect("attempted to format an invalid opcode");
+        let opcode = Self::OPCODES[code].expect(&format!(
+            "attempted to format an invalid opcode: {code:#04X} at {:#06X}",
+            self.program_counter
+        ));
         let low = || {
             self.bus
                 .peek(self.program_counter.wrapping_add(1))
@@ -567,7 +570,10 @@ impl<B: CpuBus> Cpu<B> {
                     self.data_cache = 0;
                     (opcode, 0)
                 } else {
-                    panic!("invalid opcode: {code:#04X}");
+                    panic!(
+                        "invalid opcode: {code:#04X}, program counter {:#06X} (- 1)",
+                        self.program_counter
+                    );
                 }
             }
         };

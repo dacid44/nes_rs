@@ -1,6 +1,23 @@
+use enum_dispatch::enum_dispatch;
+
+use crate::bus::Bus;
+
+use self::{
+    nrom::{NRom, NRomPpu},
+    uxrom::{UxRom, UxRomPpu},
+};
+
+mod nrom;
+mod uxrom;
+
 const NES_TAG: [u8; 4] = [0x4E, 0x45, 0x53, 0x1A];
 const PRG_ROM_PAGE_SIZE: usize = 0x4000;
 const CHR_ROM_PAGE_SIZE: usize = 0x2000;
+
+#[enum_dispatch]
+pub trait Mapper: Bus {
+    fn ppu_mapper(&self) -> PpuMapper;
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mirroring {
@@ -9,11 +26,26 @@ pub enum Mirroring {
     FourScreen,
 }
 
-pub struct Rom {
-    pub prg_rom: Box<[u8]>,
-    pub chr_rom: Box<[u8]>,
-    pub mapper: u8,
-    pub screen_mirroring: Mirroring,
+pub fn mirror_vram_addr(addr: u16, mirroring: Mirroring) -> u16 {
+    let vram_index = addr & 0xFFF;
+    let offset = match mirroring {
+        Mirroring::Vertical => [0, 0, 0x800, 0x800],
+        Mirroring::Horizontal => [0, 0x400, 0x400, 0x800],
+        _ => [0; 4],
+    };
+    vram_index - offset[(vram_index / 0x400) as usize]
+}
+
+#[enum_dispatch(Mapper, Bus)]
+pub enum Rom {
+    NRom,
+    UxRom,
+}
+
+#[enum_dispatch(Bus)]
+pub enum PpuMapper {
+    NRomPpu,
+    UxRomPpu,
 }
 
 impl Rom {
@@ -54,19 +86,18 @@ impl Rom {
         //     chr2, 0x00,
         // ]);
 
-        Ok(Self {
-            prg_rom: raw[prg_rom_start..prg_rom_start + prg_rom_size].into(),
-            chr_rom: raw[chr_rom_start..chr_rom_start + chr_rom_size].into(),
-            mapper,
-            screen_mirroring,
-        })
-    }
-
-    pub fn read_prg_rom(&self, mut addr: u16) -> u8 {
-        addr -= 0x8000;
-        if addr as usize >= self.prg_rom.len() {
-            addr -= 0x4000;
+        eprintln!("mapper: {mapper}, prg_rom_start: {prg_rom_start}, prg_rom_size: {prg_rom_size}");
+        match mapper {
+            0 => Ok(Self::NRom(NRom::new(
+                &raw[prg_rom_start..prg_rom_start + prg_rom_size],
+                &raw[chr_rom_start..chr_rom_start + chr_rom_size],
+                screen_mirroring,
+            ))),
+            2 => Ok(Self::UxRom(UxRom::new(
+                &raw[prg_rom_start..prg_rom_start + prg_rom_size],
+                screen_mirroring,
+            ))),
+            _ => Err("Unknown mapper".to_string()),
         }
-        self.prg_rom[addr as usize]
     }
 }

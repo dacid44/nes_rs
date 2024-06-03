@@ -1,13 +1,12 @@
 use std::{
-    sync::mpsc::{self, Sender},
-    thread,
-    time::{Duration, Instant},
+    env, fs::File, io::Read, sync::mpsc::{self, Sender}, thread, time::{Duration, Instant}
 };
 
 use bus::CpuBus;
 use cpu::Cpu;
 use joypad::{Button, Joypad};
 use ppu::Frame;
+use rom::Rom;
 use sdl2::{
     event::Event,
     keyboard::Keycode,
@@ -15,7 +14,7 @@ use sdl2::{
     EventPump,
 };
 
-use crate::{bus::NesBus, rom::Rom};
+use crate::bus::NesBus;
 
 mod bus;
 mod cpu;
@@ -58,10 +57,6 @@ fn main() {
     // cpu.reset();
     // cpu.program_counter = 0x400;
 
-    let mut cpu = Cpu::new(NesBus::new(
-        Rom::new(include_bytes!("../roms/Pac-Man (U) [!].nes")).unwrap(),
-    ));
-    cpu.reset();
     // cpu.program_counter = 0xC000;
     // cpu.stack_pointer = 0xFD;
 
@@ -100,26 +95,36 @@ fn main() {
 
     let (frame_tx, frame_rx) = mpsc::channel();
     let (input_tx, input_rx) = mpsc::channel();
-    thread::spawn(move || loop {
-        ts += Duration::from_secs_f64(1.0 / CLOCK_SPEED);
-        // let duration = (ts - Instant::now()).max(Duration::ZERO);
-        // spin_sleep::sleep(duration);
-        while Instant::now() < ts {}
+    thread::spawn(move || {
+        let rom_filename = env::args().skip(1).next().unwrap();
+        let mut buffer = Vec::new();
+        File::open(rom_filename).unwrap().read_to_end(&mut buffer).unwrap();
+        let mut cpu = Cpu::new(NesBus::new(
+            Rom::new(&buffer).unwrap(),
+        ));
+        cpu.reset();
 
-        if !is_vblank && cpu.bus.ppu.is_vblank() {
-            frame_tx.send(cpu.bus.ppu.frame.data.clone()).unwrap();
-            for (joypad, button, state) in input_rx.try_iter() {
-                (&mut cpu.bus.joypads[joypad] as &mut Joypad).buttons[button] = state;
+        loop {
+            ts += Duration::from_secs_f64(1.0 / CLOCK_SPEED);
+            // let duration = (ts - Instant::now()).max(Duration::ZERO);
+            // spin_sleep::sleep(duration);
+            while Instant::now() < ts {}
+
+            if !is_vblank && cpu.bus.ppu.is_vblank() {
+                frame_tx.send(cpu.bus.ppu.frame.data.clone()).unwrap();
+                for (joypad, button, state) in input_rx.try_iter() {
+                    (&mut cpu.bus.joypads[joypad] as &mut Joypad).buttons[button] = state;
+                }
+                is_vblank = true;
+            } else if is_vblank && !cpu.bus.ppu.is_vblank() {
+                is_vblank = false;
             }
-            is_vblank = true;
-        } else if is_vblank && !cpu.bus.ppu.is_vblank() {
-            is_vblank = false;
-        }
 
-        cpu.run_cycle();
-        cpu.bus.ppu.run_cycle();
-        cpu.bus.ppu.run_cycle();
-        cpu.bus.ppu.run_cycle();
+            cpu.run_cycle();
+            cpu.bus.ppu.run_cycle();
+            cpu.bus.ppu.run_cycle();
+            cpu.bus.ppu.run_cycle();
+        }
     });
 
     loop {
@@ -149,10 +154,10 @@ fn main() {
 fn handle_user_input(channel: &Sender<(usize, Button, bool)>, event_pump: &mut EventPump) {
     let joypad_button = |keycode: Keycode| {
         Some(match keycode {
-            Keycode::Num1 => (0, Button::A),
-            Keycode::Num2 => (0, Button::B),
-            Keycode::Return => (0, Button::Select),
-            Keycode::Space => (0, Button::Start),
+            Keycode::Num1 | Keycode::J => (0, Button::A),
+            Keycode::Num2 | Keycode::K => (0, Button::B),
+            Keycode::Return | Keycode::U => (0, Button::Select),
+            Keycode::Space | Keycode::I => (0, Button::Start),
             Keycode::W => (0, Button::Up),
             Keycode::S => (0, Button::Down),
             Keycode::A => (0, Button::Left),

@@ -1,8 +1,10 @@
+use enum_dispatch::enum_dispatch;
+
 use crate::{
     cpu::{Interrupts, PROGRAM_START, PROGRAM_START_LOC},
     joypad::Joypad,
     ppu::{Ppu, PpuBus},
-    rom::Rom,
+    rom::{Rom, Mapper},
 };
 
 pub trait CpuBus: Bus {
@@ -13,6 +15,7 @@ pub trait CpuBus: Bus {
     fn run_cycle(&mut self) {}
 }
 
+#[enum_dispatch]
 pub trait Bus {
     fn read(&mut self, addr: u16) -> u8;
 
@@ -59,8 +62,8 @@ impl Bus for FlatRam {
 impl CpuBus for FlatRam {}
 
 pub struct NesBus {
-    cpu_vram: [u8; 0x800],
-    prg_rom: Box<[u8]>,
+    cpu_ram: [u8; 0x800],
+    rom: Rom,
     pub ppu: Ppu,
     last_nmi_state: bool,
     pub joypads: [Joypad; 2],
@@ -73,10 +76,11 @@ impl NesBus {
     const PPU_REGISTERS_MIRRORS_END: u16 = 0x3FFF;
 
     pub fn new(rom: Rom) -> Self {
+        let ppu_mapper = rom.ppu_mapper();
         Self {
-            cpu_vram: [0; 2048],
-            prg_rom: rom.prg_rom,
-            ppu: Ppu::new(PpuBus::new(rom.chr_rom, rom.screen_mirroring)),
+            cpu_ram: [0; 2048],
+            rom,
+            ppu: Ppu::new(PpuBus::new(ppu_mapper)),
             last_nmi_state: false,
             joypads: [Joypad::new(), Joypad::new()],
         }
@@ -88,19 +92,13 @@ impl Bus for NesBus {
         // println!("read at {addr:04X}");
         match addr {
             Self::RAM..=Self::RAM_MIRRORS_END => {
-                self.cpu_vram[(addr & 0b00000111_11111111) as usize]
+                self.cpu_ram[(addr & 0b00000111_11111111) as usize]
             }
             Self::PPU_REGISTERS..=Self::PPU_REGISTERS_MIRRORS_END => self.ppu.read(addr),
-            0x8000..=0xFFFF => {
-                let mut rom_addr = addr - 0x8000;
-                if rom_addr as usize >= self.prg_rom.len() {
-                    rom_addr -= 0x4000;
-                }
-                self.prg_rom[rom_addr as usize]
-            }
             0x4016..=0x4017 => self.joypads[(addr - 0x4016) as usize].read(),
+            0x4020..=0xFFFF => self.rom.read(addr),
             _ => {
-                // println!("Ignoring mem access at {addr:#06X}");
+                // println!("Ignoring mem read access at {addr:#06X}");
                 0
             }
         }
@@ -109,7 +107,7 @@ impl Bus for NesBus {
     fn write(&mut self, addr: u16, data: u8) {
         match addr {
             Self::RAM..=Self::RAM_MIRRORS_END => {
-                self.cpu_vram[(addr & 0b00000111_11111111) as usize] = data;
+                self.cpu_ram[(addr & 0b00000111_11111111) as usize] = data;
             }
             Self::PPU_REGISTERS..=Self::PPU_REGISTERS_MIRRORS_END => {
                 self.ppu.write(addr, data);
@@ -122,12 +120,11 @@ impl Bus for NesBus {
                         self.read(page | i as u16);
                 }
             }
-            0x4016..=0x4017 => {
-                self.joypads[(addr - 0x4016) as usize].write(data);
+            0x4016 => {
+                self.joypads[0].write(data);
+                self.joypads[1].write(data);
             }
-            0x8000..=0xFFFF => {
-                panic!("attempt to write to cartridge PRG ROM space");
-            }
+            0x4020..=0xFFFF => self.rom.write(addr, data),
             _ => {
                 // println!("Ignoring mem write access at {addr:#06X}");
             }
@@ -137,15 +134,9 @@ impl Bus for NesBus {
     fn peek(&self, addr: u16) -> Option<u8> {
         match addr {
             Self::RAM..=Self::RAM_MIRRORS_END => {
-                Some(self.cpu_vram[(addr & 0b00000111_11111111) as usize])
+                Some(self.cpu_ram[(addr & 0b00000111_11111111) as usize])
             }
-            0x8000..=0xFFFF => {
-                let mut rom_addr = addr - 0x8000;
-                if rom_addr as usize >= self.prg_rom.len() {
-                    rom_addr -= 0x4000;
-                }
-                Some(self.prg_rom[rom_addr as usize])
-            }
+            0x4020..=0xFFFF => self.rom.peek(addr),
             _ => None,
         }
     }

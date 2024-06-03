@@ -17,23 +17,24 @@ impl Joypad {
     }
 
     pub fn read(&mut self) -> u8 {
-        let data = if let Some(button) = self.read_cycle {
-            self.buttons[button] as u8
-        } else {
-            1
-        };
-        if let (Some(button), false) = (self.read_cycle, self.strobe_mode) {
-            self.read_cycle = match button {
-                Button::A => Some(Button::B),
-                Button::B => Some(Button::Select),
-                Button::Select => Some(Button::Start),
-                Button::Start => Some(Button::Up),
-                Button::Up => Some(Button::Down),
-                Button::Down => Some(Button::Left),
-                Button::Left => Some(Button::Right),
-                Button::Right => None,
+        let data = match (self.read_cycle, self.strobe_mode) {
+            (_, true) => self.buttons[Button::A] as u8,
+            (Some(button), false) => {
+                let data = self.buttons[button] as u8;
+                self.read_cycle = match button {
+                    Button::A => Some(Button::B),
+                    Button::B => Some(Button::Select),
+                    Button::Select => Some(Button::Start),
+                    Button::Start => Some(Button::Up),
+                    Button::Up => Some(Button::Down),
+                    Button::Down => Some(Button::Left),
+                    Button::Left => Some(Button::Right),
+                    Button::Right => None,
+                };
+                data
             }
-        }
+            (None, false) => 1
+        };
         data
     }
 
